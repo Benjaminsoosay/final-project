@@ -1,0 +1,172 @@
+// IIFE – fetch product fact on load (immediately invoked)
+const productFact = (function() {
+    const facts = [
+        "The first-ever barcode was scanned on a pack of Wrigley’s gum in 1974.",
+        "Amazon sold its first book in 1995: 'Fluid Concepts & Creative Analogies'.",
+        "The most expensive product ever sold online was a private jet for $40 million.",
+        "Over 40% of online shoppers use voice search to find products.",
+        "The average online shopping cart abandonment rate is nearly 70%."
+    ];
+    const randomFact = facts[Math.floor(Math.random() * facts.length)];
+    return randomFact;
+})();
+
+// ----- Global state -----
+let allProducts = [];
+let cart = JSON.parse(localStorage.getItem('cart')) || [];
+
+// ----- DOM elements -----
+const productListDiv = document.getElementById('product-list');
+const searchInput = document.getElementById('search');
+const categoryFilter = document.getElementById('category-filter');
+const cartCountSpan = document.getElementById('cart-count');
+const modal = document.getElementById('product-modal');
+const modalBody = document.getElementById('modal-body');
+const addToCartModalBtn = document.getElementById('add-to-cart-modal');
+const closeModalSpan = document.querySelector('.close');
+const factBox = document.getElementById('product-fact');
+
+// ----- Helper: update cart UI & localStorage -----
+function updateCartUI() {
+    const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+    cartCountSpan.innerText = totalItems;
+    localStorage.setItem('cart', JSON.stringify(cart));
+}
+
+// ----- Recursion: calculate discount using factorial (fun example) -----
+// discount = 1 - (1 / (factorial(n) + 1)) where n is quantity
+function factorial(n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
+function getDiscountFactor(quantity) {
+    const fact = factorial(Math.min(quantity, 6)); // cap at 6! to avoid huge numbers
+    return 1 - (1 / (fact + 1));
+}
+
+// ----- Add to cart with closure for product details -----
+function createAddToCartHandler(product) {
+    // closure captures product
+    return function() {
+        const existing = cart.find(item => item.id === product.id);
+        if (existing) {
+            existing.quantity++;
+        } else {
+            cart.push({ ...product, quantity: 1 });
+        }
+        updateCartUI();
+        alert(`${product.title} added to cart!`);
+    };
+}
+
+// ----- Render product grid -----
+function renderProducts(products) {
+    productListDiv.innerHTML = '';
+    if (products.length === 0) {
+        productListDiv.innerHTML = '<p>No products found.</p>';
+        return;
+    }
+    products.forEach(product => {
+        const card = document.createElement('div');
+        card.className = 'product-card';
+        card.innerHTML = `
+            <img src="${product.image}" alt="${product.title}">
+            <h3>${product.title.substring(0, 45)}</h3>
+            <div class="price">$${product.price}</div>
+        `;
+        // using closure for click event
+        const clickHandler = (function(prod) {
+            return function() { showProductDetails(prod); };
+        })(product);
+        card.addEventListener('click', clickHandler);
+        productListDiv.appendChild(card);
+    });
+}
+
+// ----- Show product details modal (closure for add-to-cart) -----
+let currentProduct = null;
+function showProductDetails(product) {
+    currentProduct = product;
+    const discount = getDiscountFactor(1); // base discount for 1 item
+    const discountedPrice = (product.price * (1 - discount)).toFixed(2);
+    modalBody.innerHTML = `
+        <img src="${product.image}" alt="${product.title}">
+        <h2>${product.title}</h2>
+        <p>${product.description}</p>
+        <p><strong>Price:</strong> $${product.price}</p>
+        <p><strong>With loyalty discount (1 item):</strong> $${discountedPrice}</p>
+        <p><em>Discount factor: ${(discount*100).toFixed(1)}% off</em></p>
+    `;
+    // Recommendations (random 3 products different from current)
+    const otherProducts = allProducts.filter(p => p.id !== product.id);
+    const shuffled = otherProducts.sort(() => 0.5 - Math.random());
+    const recs = shuffled.slice(0, 3);
+    let recHtml = '<h4>You might also like:</h4><div>';
+    recs.forEach(rec => {
+        recHtml += `<span class="recommendation-badge" data-id="${rec.id}">${rec.title.substring(0, 30)}</span>`;
+    });
+    recHtml += '</div>';
+    const recDiv = document.getElementById('recommendations');
+    recDiv.innerHTML = recHtml;
+    // attach click events to recommendation badges using closure
+    document.querySelectorAll('.recommendation-badge').forEach(badge => {
+        const recId = parseInt(badge.dataset.id);
+        const recProduct = allProducts.find(p => p.id === recId);
+        if (recProduct) {
+            badge.addEventListener('click', () => showProductDetails(recProduct));
+        }
+    });
+    modal.style.display = 'block';
+}
+
+// ----- Add current product to cart (modal button) -----
+addToCartModalBtn.onclick = () => {
+    if (currentProduct) {
+        const handler = createAddToCartHandler(currentProduct);
+        handler();
+    }
+};
+
+// ----- Close modal -----
+closeModalSpan.onclick = () => modal.style.display = 'none';
+window.onclick = (event) => {
+    if (event.target === modal) modal.style.display = 'none';
+};
+
+// ----- Filter products (search + category) -----
+function filterProducts() {
+    const searchTerm = searchInput.value.toLowerCase();
+    const category = categoryFilter.value;
+    let filtered = allProducts;
+    if (searchTerm) {
+        filtered = filtered.filter(p => p.title.toLowerCase().includes(searchTerm));
+    }
+    if (category !== 'all') {
+        filtered = filtered.filter(p => p.category === category);
+    }
+    renderProducts(filtered);
+}
+
+// ----- Fetch products from API -----
+async function fetchProducts() {
+    try {
+        const res = await fetch('https://fakestoreapi.com/products');
+        const data = await res.json();
+        allProducts = data;
+        renderProducts(allProducts);
+    } catch (err) {
+        productListDiv.innerHTML = '<p>Failed to load products. Please refresh.</p>';
+        console.error(err);
+    }
+}
+
+// ----- Event listeners -----
+searchInput.addEventListener('input', filterProducts);
+categoryFilter.addEventListener('change', filterProducts);
+
+// ----- Initialize page (load event) -----
+window.addEventListener('load', () => {
+    fetchProducts();
+    updateCartUI();
+    factBox.innerText = `📦 Did you know? ${productFact}`;
+});
